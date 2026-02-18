@@ -28,7 +28,6 @@ jobs:
           username: ${{ secrets.GHCR_USER }}
           password: ${{ secrets.GHCR_PAT }}
 
-      # (debug útil) mostra pra onde vai publicar, sem vazar segredo
       - name: Show target tags
         run: |
           echo "Owner(repo)=${{ github.repository_owner }}"
