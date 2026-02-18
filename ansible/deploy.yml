@@ -1,0 +1,119 @@
+- hosts: localhost
+  become: true
+  vars:
+    app_dir: /opt/pedidos-estoque
+    project_dir: "{{ playbook_dir }}/.."
+    image_tag: "{{ image_tag | default('latest') }}"
+
+  tasks:
+    - name: Garantir diretório do app
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copiar compose de produção (artefato do deploy)
+      copy:
+        src: "{{ project_dir }}/docker-compose.prod.yml"
+        dest: "{{ app_dir }}/docker-compose.yml"
+        mode: "0644"
+
+    # 1) Escreve um .env "temporário" só para testar pull (sem mexer no .env oficial ainda)
+    - name: Escrever .env.new (tag candidata)
+      copy:
+        dest: "{{ app_dir }}/.env.new"
+        content: |
+          IMAGE_TAG={{ image_tag }}
+        mode: "0644"
+
+    # 2) Testa se a tag existe (pull) usando .env.new
+    - name: Pull das imagens (TESTE da tag) - sem trocar .env ainda
+      shell: |
+        set -e
+        cd {{ app_dir }}
+        # usa env-file temporário para não quebrar rollback
+        sudo docker compose --env-file .env.new pull
+      args:
+        executable: /bin/bash
+
+    # 3) Só aqui: faz backup do .env real e aplica a nova tag
+    - name: Backup do .env anterior (se existir)
+      shell: |
+        test -f {{ app_dir }}/.env && cp {{ app_dir }}/.env {{ app_dir }}/.env.prev || true
+      args:
+        executable: /bin/bash
+
+    - name: Ativar a nova tag (promove .env.new -> .env)
+      shell: |
+        mv {{ app_dir }}/.env.new {{ app_dir }}/.env
+      args:
+        executable: /bin/bash
+
+    # 4) Rolling update + gate por HTTP no host
+    - name: Rolling update - orders-api
+      shell: |
+        cd {{ app_dir }}
+        sudo docker compose up -d --no-deps orders-api
+      args:
+        executable: /bin/bash
+
+    - name: Gate HTTP - orders-api (/health)
+      shell: |
+        set -e
+        for i in $(seq 1 30); do
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8081/health || true)
+          [ "$code" = "200" ] && exit 0
+          sleep 2
+        done
+        echo "orders-api health gate FAILED"
+        exit 1
+      args:
+        executable: /bin/bash
+
+    - name: Rolling update - status-api
+      shell: |
+        cd {{ app_dir }}
+        sudo docker compose up -d --no-deps status-api
+      args:
+        executable: /bin/bash
+
+    - name: Gate HTTP - status-api (/health)
+      shell: |
+        set -e
+        for i in $(seq 1 30); do
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8082/health || true)
+          [ "$code" = "200" ] && exit 0
+          sleep 2
+        done
+        echo "status-api health gate FAILED"
+        exit 1
+      args:
+        executable: /bin/bash
+
+    - name: Rolling update - frontend
+      shell: |
+        cd {{ app_dir }}
+        sudo docker compose up -d --no-deps frontend
+      args:
+        executable: /bin/bash
+
+    - name: Gate HTTP - frontend (/)
+      shell: |
+        set -e
+        for i in $(seq 1 30); do
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/ || true)
+          # frontend pode responder 200 ou 304
+          [ "$code" = "200" ] || [ "$code" = "304" ] && exit 0
+          sleep 2
+        done
+        echo "frontend gate FAILED"
+        exit 1
+      args:
+        executable: /bin/bash
+
+    - name: Mostrar status final do stack
+      shell: |
+        cd {{ app_dir }}
+        sudo docker compose ps
+      args:
+        executable: /bin/bash

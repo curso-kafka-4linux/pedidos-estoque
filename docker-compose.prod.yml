@@ -1,0 +1,46 @@
+services:
+  orders-api:
+    image: ghcr.io/curso-kafka-4linux/pedidos-estoque/orders-api:${IMAGE_TAG}
+    container_name: orders-api
+    restart: unless-stopped
+    ports: ["8081:8081"]
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=10.1.0.11:9092,10.1.0.12:9092,10.1.0.13:9092
+      - ORDERS_TOPIC=orders.v1
+      - PRODUCER_ACKS=-1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+
+  status-api:
+    image: ghcr.io/curso-kafka-4linux/pedidos-estoque/status-api:${IMAGE_TAG}
+    container_name: status-api
+    restart: unless-stopped
+    ports: ["8082:8082"]
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=10.1.0.11:9092,10.1.0.12:9092,10.1.0.13:9092
+      - ORDERS_TOPIC=orders.v1
+      - STATUS_TOPIC=order_status.v1
+      - GROUP_ID=status-api-v1
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+
+  frontend:
+    image: ghcr.io/curso-kafka-4linux/pedidos-estoque/frontend:${IMAGE_TAG}
+    container_name: frontend
+    restart: unless-stopped
+    ports: ["3000:80"]
+    environment:
+      - API_URL=http://127.0.0.1:8082
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
