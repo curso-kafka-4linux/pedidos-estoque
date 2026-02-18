@@ -1,4 +1,4 @@
-name: CI - Build & Push Images
+name: CI - Build & Push Images (GHCR via PAT)
 
 on:
   push:
@@ -7,18 +7,9 @@ on:
 jobs:
   build-push:
     runs-on: ubuntu-latest
-
-    # Mantém as permissões padrão do workflow.
-    # OBS: se você usar PAT, essa permissão vira "menos importante",
-    # mas pode ficar assim sem problema.
     permissions:
       contents: read
       packages: write
-
-    env:
-      REGISTRY: ghcr.io
-      OWNER: ${{ github.repository_owner }}
-      IMAGE_TAG: ${{ github.sha }}
 
     steps:
       - name: Checkout
@@ -27,32 +18,24 @@ jobs:
       - name: Set tag (short SHA)
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-      # Necessário para buildx funcionar bem
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login 1: tenta com GITHUB_TOKEN (pode falhar com 403 dependendo de org/política)
-      - name: Login GHCR (GITHUB_TOKEN)
-        id: login_gh_token
-        continue-on-error: true
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # Login 2 (fallback): usa PAT (recomendado para seu caso)
-      # Requer secrets GHCR_USER e GHCR_PAT
-      - name: Login GHCR (PAT fallback)
-        if: steps.login_gh_token.outcome != 'success'
+      - name: Login GHCR (PAT)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ secrets.GHCR_USER }}
           password: ${{ secrets.GHCR_PAT }}
+
+      # (debug útil) mostra pra onde vai publicar, sem vazar segredo
+      - name: Show target tags
+        run: |
+          echo "Owner(repo)=${{ github.repository_owner }}"
+          echo "Tag=${IMAGE_TAG}"
+          echo "orders-api => ghcr.io/${{ github.repository_owner }}/pedidos-estoque/orders-api:${IMAGE_TAG}"
+          echo "status-api => ghcr.io/${{ github.repository_owner }}/pedidos-estoque/status-api:${IMAGE_TAG}"
+          echo "frontend  => ghcr.io/${{ github.repository_owner }}/pedidos-estoque/frontend:${IMAGE_TAG}"
 
       - name: Build & push orders-api
         uses: docker/build-push-action@v6
